@@ -4,7 +4,8 @@ from django.db.models.lookups import TupleExact
 from django.db.models.query_utils import DeferredAttribute
 from django.db.models.signals import class_prepared
 from django.utils.functional import cached_property
-
+from django.db.models.constraints import UniqueConstraint
+from django.db.models.indexes import Index
 
 class CompositeCol(ExpressionList):
     def __init__(self, alias, target: "CompositeField", output_field=None):
@@ -33,9 +34,11 @@ class CompositeType:
     @classmethod
     def namedtuple(cls, name, fields):
         fields = tuple(fields)
+        doc_fields = ",".join(fields)
+        repr_fields = ", ".join(f"{name}=%r" for name in fields)
         class_namespace = {
-            "__doc__": name + "(" + ",".join(fields) + ")",
-            "_repr_fmt": "(" + ", ".join(f"{name}=%r" for name in fields) + ")",
+            "__doc__": f"{name}({doc_fields})",
+            "_repr_fmt": f"({repr_fields})",
             "__slots__": ("_instance",),
             "_fields": fields,
         }
@@ -150,18 +153,18 @@ class CompositeField(Field):
         )
         result = super().contribute_to_class(cls, name, private_only)
         setattr(cls, self.attname, self.descriptor_class(self))
-
         if self.primary_key:
             cls._meta.pk = self
         if self.unique or self.primary_key:
-            cls._meta.unique_together = (
-                *cls._meta.unique_together,
-                self.component_names,
+            cls._meta.constraints.append(
+                UniqueConstraint(
+                    fields=self.component_names, name=f"{cls.__name__}_{name}_uniq"
+                )
             )
 
             # logger.info(f"{cls.__name__}: unique {cls._meta.unique_together}")
         if self.db_index:
-            cls._meta.index_together = (*cls._meta.index_together, self.component_names)
+            cls._meta.indexes.append(Index(fields=self.component_names))
 
         return result
 
