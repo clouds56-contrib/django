@@ -1251,7 +1251,6 @@ class Model(metaclass=ModelBase):
         failed.
         """
         unique_checks, date_checks = self._get_unique_checks(exclude=exclude)
-
         errors = self._perform_unique_checks(unique_checks)
         date_errors = self._perform_date_checks(date_checks)
 
@@ -1314,7 +1313,7 @@ class Model(metaclass=ModelBase):
                 name = f.name
                 if name in exclude:
                     continue
-                if f.unique:
+                if f.unique and f.get_internal_type() not in ("CompositeField",):
                     unique_checks.append((model_class, (name,)))
                 if f.unique_for_date and f.unique_for_date not in exclude:
                     date_checks.append((model_class, "date", name, f.unique_for_date))
@@ -1345,12 +1344,12 @@ class Model(metaclass=ModelBase):
                 if f.primary_key and not self._state.adding:
                     # no need to check for unique primary key when editing
                     continue
+                
                 lookup_kwargs[str(field_name)] = lookup_value
 
             # some fields were skipped, no reason to do the check
             if len(unique_check) != len(lookup_kwargs):
                 continue
-
             qs = model_class._default_manager.filter(**lookup_kwargs)
 
             # Exclude the current object from the query if we are editing an
@@ -1360,6 +1359,9 @@ class Model(metaclass=ModelBase):
             # allows single model to have effectively multiple primary keys.
             # Refs #17615.
             model_class_pk = self._get_pk_val(model_class._meta)
+            if type(model_class_pk) == tuple:
+                model_class_pk = str(model_class_pk)
+                
             if not self._state.adding and model_class_pk is not None:
                 qs = qs.exclude(pk=model_class_pk)
             if qs.exists():

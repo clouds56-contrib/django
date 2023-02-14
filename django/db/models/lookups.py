@@ -230,6 +230,7 @@ class BuiltinLookup(Lookup):
     def as_sql(self, compiler, connection):
         lhs_sql, params = self.process_lhs(compiler, connection)
         rhs_sql, rhs_params = self.process_rhs(compiler, connection)
+        
         params.extend(rhs_params)
         rhs_sql = self.get_rhs_op(connection, rhs_sql)
         return "%s %s" % (lhs_sql, rhs_sql), params
@@ -374,12 +375,12 @@ class TupleExact(Exact):
 
     def as_sql(self, compiler, connection):
         from django.db.models.sql.where import AND, WhereNode
-
         if not connection.ops.tuple_operation(self):
+            
             lhs = self.lhs.get_source_expressions()
             if len(lhs) != len(self.rhs):
                 raise ValueError(
-                    f"The QuerySet value for an exact lookup must has same "
+                    f"The QuerySet value for an exact lookup must have the same "
                     f"arity for lhs and rhs ({len(lhs)} != {len(self.rhs)})"
                 )
             exprs = [
@@ -388,6 +389,25 @@ class TupleExact(Exact):
             ]
             return compiler.compile(WhereNode(exprs, connector=AND))
         return super().as_sql(compiler, connection)
+
+
+class CompositeExact(TupleExact):
+    def as_sql(self, compiler, connection):
+        sql, params = super().as_sql(compiler, connection)
+        length = len(params)
+        
+        if length == 1 and isinstance(params[0], (list, tuple)):    
+            params = params[0]
+            length = len(params)
+            
+            new_rhs_placeholder = "("
+            for _ in range(length):
+                new_rhs_placeholder = new_rhs_placeholder + "%s,"
+            new_rhs_placeholder = new_rhs_placeholder[:-1] + ")"
+            
+            sql = sql.replace("%s", new_rhs_placeholder)
+        
+        return sql, params
 
 
 @Field.register_lookup
@@ -504,7 +524,7 @@ class In(FieldGetDbPrepValueIterableMixin, BuiltinLookup):
     def split_exact_as_sql(self, compiler, connection):
         from django.db.models.sql.where import OR, WhereNode
 
-        exprs = [TupleExact(self.lhs, rhs) for rhs in self.rhs]
+        exprs = [CompositeExact(self.lhs, rhs) for rhs in self.rhs]
         return compiler.compile(WhereNode(exprs, connector=OR))
 
     def split_parameter_list_as_sql(self, compiler, connection):
@@ -528,6 +548,26 @@ class In(FieldGetDbPrepValueIterableMixin, BuiltinLookup):
             params.extend(sqls_params)
         in_clause_elements.append(")")
         return "".join(in_clause_elements), params
+
+
+class CompositeIn(In):
+    def as_sql(self, compiler, connection):
+        sql, params = super().as_sql(compiler, connection)
+        
+        length = len(params)
+        
+        if length == 1 and isinstance(params[0], (list, tuple)):    
+            params = params[0]
+            length = len(params)
+            
+            new_rhs_placeholder = "("
+            for _ in range(length):
+                new_rhs_placeholder = new_rhs_placeholder + "%s,"
+            new_rhs_placeholder = new_rhs_placeholder[:-1] + ")"
+            
+            sql = sql.replace("%s", new_rhs_placeholder)
+        
+        return sql, params
 
 
 class PatternLookup(BuiltinLookup):

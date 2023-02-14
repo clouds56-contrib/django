@@ -1,10 +1,11 @@
 from django.db.models.expressions import Col, ExpressionList
 from django.db.models.fields import Field
-from django.db.models.lookups import TupleExact
+from django.db.models.lookups import TupleExact, CompositeExact, CompositeIn
 from django.db.models.query_utils import DeferredAttribute
 from django.db.models.signals import class_prepared
 from django.utils.functional import cached_property
-
+from django.db.models.constraints import UniqueConstraint
+from django.db.models.indexes import Index
 
 class CompositeCol(ExpressionList):
     def __init__(self, alias, target: "CompositeField", output_field=None):
@@ -20,7 +21,9 @@ class CompositeCol(ExpressionList):
 
     def get_lookup(self, lookup):
         if lookup == "exact":
-            return TupleExact
+            return CompositeExact
+        elif lookup == 'in':
+            return CompositeIn
         return super().get_lookup(lookup)
 
 
@@ -33,9 +36,11 @@ class CompositeType:
     @classmethod
     def namedtuple(cls, name, fields):
         fields = tuple(fields)
+        doc_fields = ",".join(fields)
+        repr_fields = ", ".join(f"{name}=%r" for name in fields)
         class_namespace = {
-            "__doc__": name + "(" + ",".join(fields) + ")",
-            "_repr_fmt": "(" + ", ".join(f"{name}=%r" for name in fields) + ")",
+            "__doc__": f"{name}({doc_fields})",
+            "_repr_fmt": f"({repr_fields})",
             "__slots__": ("_instance",),
             "_fields": fields,
         }
@@ -82,6 +87,9 @@ class CompositeType:
         "Return a new dict which maps field names to their values."
         return dict(zip(self._fields, self))
 
+    def __hash__(self):
+        return hash(self._fields)
+
     def __len__(self):
         return len(self._fields)
 
@@ -121,6 +129,8 @@ class CompositeDeferredAttribute(DeferredAttribute):
         return data[field_name]
 
     def __set__(self, instance, value):
+        if value is None:
+            value = [None for _ in range(len(self.field.component_names))]
         for name, val in zip(self.field.component_names, value):
             setattr(instance, name, val)
 
@@ -148,22 +158,22 @@ class CompositeField(Field):
         self.python_type = CompositeType.namedtuple(
             f"{cls.__name__}__{name}", self.component_names
         )
-        result = super().contribute_to_class(cls, name, private_only)
+        super().contribute_to_class(cls, name, private_only)
         setattr(cls, self.attname, self.descriptor_class(self))
 
         if self.primary_key:
             cls._meta.pk = self
-        if self.unique or self.primary_key:
-            cls._meta.unique_together = (
-                *cls._meta.unique_together,
-                self.component_names,
+        if (self.unique or self.primary_key):
+            cls._meta.constraints.append(
+                UniqueConstraint(
+                    fields=self.component_names, name=f"{cls.__name__}_{name}_unique"
+                )
             )
-
-            # logger.info(f"{cls.__name__}: unique {cls._meta.unique_together}")
         if self.db_index:
-            cls._meta.index_together = (*cls._meta.index_together, self.component_names)
+            cls._meta.indexes.append(Index(fields=self.component_names))
 
-        return result
+    def __hash__(self):
+        return hash(self.component_fields)
 
     def get_col(self, alias, output_field=None):
         if alias == self.model._meta.db_table and (
@@ -171,6 +181,13 @@ class CompositeField(Field):
         ):
             return self.cached_col
         return CompositeCol(alias, self, output_field)
+
+    def deconstruct(self):
+        name, path, args, kwargs = super().deconstruct()
+        args = list(self.component_names)
+
+        # Handle the simpler arguments    
+        return name, path, args, kwargs
 
     @cached_property
     def cached_col(self):
@@ -185,6 +202,5 @@ def resolve_columns(*args, **kwargs):
             field.component_fields = tuple(
                 cls._meta.get_field(name) for name in field.component_names
             )
-
 
 class_prepared.connect(resolve_columns)
