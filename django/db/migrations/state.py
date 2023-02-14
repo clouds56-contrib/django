@@ -623,7 +623,6 @@ class StateApps(Apps):
         # updating it.
         self._lock = None
         self.ready_event = None
-
         self.render_multiple([*models.values(), *self.real_models])
 
         # There shouldn't be any operations pending at this point.

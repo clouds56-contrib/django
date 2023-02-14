@@ -102,6 +102,7 @@ class BaseDatabaseSchemaEditor:
         "UPDATE %(table)s SET %(column)s = %(default)s WHERE %(column)s IS NULL"
     )
 
+    sql_primary_key = "PRIMARY KEY (%(columns)s)"
     sql_unique_constraint = "UNIQUE (%(columns)s)%(deferrable)s"
     sql_check_constraint = "CHECK (%(check)s)"
     sql_delete_constraint = "ALTER TABLE %(table)s DROP CONSTRAINT %(name)s"
@@ -262,18 +263,36 @@ class BaseDatabaseSchemaEditor:
                 )
                 if autoinc_sql:
                     self.deferred_sql.extend(autoinc_sql)
+        
         constraints = [
             constraint.constraint_sql(model, self)
             for constraint in model._meta.constraints
         ]
+
+        simple_primary_key = not any(
+            field.primary_key and field.get_internal_type() in (
+                "CompositeField",
+            ) for field in model._meta.local_fields
+        )
+
+        primary_constraint = ''
+        if not simple_primary_key:
+            primary_key_field = [field for field in model._meta.local_fields if field.primary_key][0]
+            component_fields = [model._meta.get_field(name) for name in primary_key_field.component_names]
+            component_columns = [field.column for field in component_fields]
+            primary_constraint = ", " + self.sql_primary_key % {
+                "columns" :", ".join(self.quote_name(column) for column in component_columns)
+            }
+            
         sql = self.sql_create_table % {
             "table": self.quote_name(model._meta.db_table),
             "definition": ", ".join(
-                str(constraint)
+                [str(constraint)
                 for constraint in (*column_sqls, *constraints)
-                if constraint
-            ),
+                if constraint]
+            ) + primary_constraint,
         }
+        
         if model._meta.db_tablespace:
             tablespace_sql = self.connection.ops.tablespace_sql(
                 model._meta.db_tablespace
