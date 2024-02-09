@@ -161,14 +161,25 @@ class CompositeField(Field):
         super().contribute_to_class(cls, name, private_only)
         setattr(cls, self.attname, self.descriptor_class(self))
 
-        if self.primary_key:
-            cls._meta.pk = self
-        if (self.unique or self.primary_key):
-            cls._meta.constraints.append(
-                UniqueConstraint(
-                    fields=self.component_names, name=f"{cls.__name__}_{name}_unique"
+        only_unique = False
+        if self.unique and not self.primary_key:
+            only_unique = True
+
+        if only_unique:
+            found_constraint = False
+
+            for constraint in cls._meta.constraints:
+                if constraint.fields == self.component_names:
+                    found_constraint = True
+                    break
+
+            if not found_constraint:
+                cls._meta.constraints.append(
+                    UniqueConstraint(
+                        fields=self.component_names, name=f"{cls.__name__}_{name}_unique"
+                    )
                 )
-            )
+
         if self.db_index:
             cls._meta.indexes.append(Index(fields=self.component_names))
 
@@ -186,7 +197,7 @@ class CompositeField(Field):
         name, path, args, kwargs = super().deconstruct()
         args = list(self.component_names)
 
-        # Handle the simpler arguments    
+        # Handle the simpler arguments
         return name, path, args, kwargs
 
     @cached_property

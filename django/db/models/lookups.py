@@ -2,14 +2,7 @@ import itertools
 import math
 
 from django.core.exceptions import EmptyResultSet
-from django.db.models.expressions import (
-    Case,
-    Expression,
-    ExpressionList,
-    Func,
-    Value,
-    When,
-)
+from django.db.models.expressions import Case,Expression,ExpressionList,Func,Value,When
 from django.db.models.fields import (
     BooleanField,
     CharField,
@@ -230,7 +223,6 @@ class BuiltinLookup(Lookup):
     def as_sql(self, compiler, connection):
         lhs_sql, params = self.process_lhs(compiler, connection)
         rhs_sql, rhs_params = self.process_rhs(compiler, connection)
-        
         params.extend(rhs_params)
         rhs_sql = self.get_rhs_op(connection, rhs_sql)
         return "%s %s" % (lhs_sql, rhs_sql), params
@@ -375,6 +367,8 @@ class TupleExact(Exact):
 
     def as_sql(self, compiler, connection):
         from django.db.models.sql.where import AND, WhereNode
+        from django.db.models.fields.related import RelatedField
+        from django.db.models.fields.related_lookups import RelatedExact
         if not connection.ops.tuple_operation(self):
             
             lhs = self.lhs.get_source_expressions()
@@ -383,8 +377,9 @@ class TupleExact(Exact):
                     f"The QuerySet value for an exact lookup must have the same "
                     f"arity for lhs and rhs ({len(lhs)} != {len(self.rhs)})"
                 )
+                
             exprs = [
-                Exact(lhs, rhs)
+                RelatedExact(lhs, rhs) if isinstance(lhs.field, RelatedField) else Exact(lhs, rhs) #Check if foreign key or not
                 for lhs, rhs in zip(self.lhs.get_source_expressions(), self.rhs)
             ]
             return compiler.compile(WhereNode(exprs, connector=AND))

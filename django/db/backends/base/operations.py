@@ -494,7 +494,7 @@ class BaseDatabaseOperations:
         If tuple unsupport, it would expand tuple to several conditions.
         Now only `Exact`/`TupleExact` and `In` support this.
         """
-        return True
+        return False
 
     def prep_for_like_query(self, x):
         """Prepare a value for use in a LIKE query."""

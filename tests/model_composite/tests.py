@@ -1,3 +1,4 @@
+from django.db import IntegrityError
 from django.test import TestCase
 
 from .models import Employee, Employee2, User
@@ -37,6 +38,30 @@ class CompositePKTests(TestCase):
         Employee.objects.only("pk").get(pk=("root", 1235))
         Employee.objects.defer("pk").get(pk=("root", 1235))
         Employee.objects.filter(pk__in=[("root", 1234), ("root", 1235)]).last()
+
+        self.assertRaises(IntegrityError, Employee.objects.create, composite_pk=("root", 1234))
+
+
+    def test_operations(self):
+        """
+        Test operations such as creation, update and delete
+        """
+        Employee.objects.create(
+            branch="root", employee_code=1234, first_name="Foo", last_name="Bar"
+        )
+
+        # Check that the save updates the existent object and does not try to create a new one
+        # with the same primary key
+        employee = Employee.objects.get(pk=("root", 1234))
+        employee.last_name = "Bar_Bar"
+        employee.save()
+
+        self.assertEqual(Employee.objects.get(pk=("root", 1234)), employee)
+
+        # Test the delete function
+        employee.delete()
+        self.assertEqual(0, len(Employee.objects.all()))
+
 
     def test_relation(self):
         Employee.objects.create(

@@ -68,6 +68,7 @@ class DatabaseCreation(BaseDatabaseCreation):
             *cmd_args[1:-1],
             "--routines",
             "--events",
+            "--column-statistics=0",
             source_database_name,
         ]
         dump_env = load_env = {**os.environ, **cmd_env} if cmd_env else None
